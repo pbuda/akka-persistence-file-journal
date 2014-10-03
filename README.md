@@ -34,6 +34,7 @@ The metadata blocks have the following structure:
 
 | Field name                  | Length   | Description                                                        |
 | --------------------------- | -------- | ------------------------------------------------------------------ |
+| Block's size                | 2 bytes  | Indicates how big this block is                                    |
 | Offset of the first message | 8 bytes  | Used to find the first message in the `data` file                  |
 | Offset of the last message  | 8 bytes  | Used to find the last message in the `data` file                   |
 | Highest sequence number     | 8 bytes  | The highest sequence number of the messages for the persistence id |
