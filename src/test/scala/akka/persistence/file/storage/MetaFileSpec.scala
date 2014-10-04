@@ -21,7 +21,7 @@ class MetaFileSpec extends FunSuite with Matchers with BeforeAndAfter {
   }
 
   test("should store a block and then find it") {
-    val block = Block(16, 0, 1, "P0")
+    val block = MetaBlock(16, 0, 1, "P0")
     meta.append(block)
     //reinitialize meta
     meta = new MetaFile(path)
@@ -30,8 +30,29 @@ class MetaFileSpec extends FunSuite with Matchers with BeforeAndAfter {
 
   test("should complain when trying to store an already existing block") {
     intercept[IllegalArgumentException] {
-      meta.append(Block(16, 0, 1, "P1"))
+      meta.append(MetaBlock(16, 0, 1, "P1"))
     }
+  }
+
+  test("should complain when trying to update a block that doesn't exist") {
+    intercept[IllegalStateException] {
+      meta.update(MetaBlock(16, 160, 2, "P0"))
+    }
+  }
+
+  test("should update an already existing block in cache") {
+    val updatedBlock = MetaBlock(16, 160, 2, "P1")
+    meta.update(updatedBlock)
+    val foundBlock = meta.findBlock("P1")
+    foundBlock.get should equal(updatedBlock)
+  }
+
+  test("should update an already existing block in file") {
+    val updatedBlock = MetaBlock(16, 160, 2, "P1")
+    meta.update(updatedBlock)
+    meta = new MetaFile(path)
+    val foundBlock = meta.findBlock("P1")
+    foundBlock.get should equal(updatedBlock)
   }
 
   before {
@@ -50,8 +71,8 @@ object MetaFileSpecUtils {
     val charset = Charset.forName("utf-8")
 
     val bytes = Array(
-      Block(16, 0, 1, "P1").bytes,
-      Block(16, 0, 1, "P2").bytes
+      MetaBlock(16, 0, 1, "P1").bytes,
+      MetaBlock(16, 0, 1, "P2").bytes
     )
 
 

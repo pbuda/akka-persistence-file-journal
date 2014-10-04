@@ -3,7 +3,6 @@ package akka.persistence.file.storage
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel.MapMode
-import java.nio.channels.FileLock
 import java.nio.charset.Charset
 
 import scala.collection.mutable.ListBuffer
@@ -15,15 +14,19 @@ class MetaFile(path: String) {
 
   private val meta = new RandomAccessFile(path, "rw").getChannel.map(MapMode.READ_WRITE, 0, BufferSize)
 
-  private val blocks: ListBuffer[Block] = {
-    meta.position(LengthOffset)
-    val length = meta.getInt
-    val buffer = ListBuffer[Block]()
+  private val blocks: ListBuffer[CachedBlock] = {
+    val length = dataLength
+    val buffer = ListBuffer[CachedBlock]()
     while (meta.position < length) {
-      buffer.append(readCurrentBlock())
+      buffer.append(CachedBlock(meta.position(), readCurrentBlock()))
     }
     meta.rewind()
     buffer
+  }
+
+  private def dataLength = {
+    meta.position(LengthOffset)
+    meta.getInt
   }
 
   /**
@@ -32,11 +35,11 @@ class MetaFile(path: String) {
    * @param persistenceId persistence id of the block to find
    * @return found block or None
    */
-  def findBlock(persistenceId: String): Option[Block] = {
-    blocks.find(_.persistenceId == persistenceId)
+  def findBlock(persistenceId: String): Option[MetaBlock] = {
+    blocks.find(_.block.persistenceId == persistenceId).map(_.block)
   }
 
-  private def readCurrentBlock(): Block = {
+  private def readCurrentBlock(): MetaBlock = {
     meta.mark()
     val blockSize = meta.getShort
     val bytes = Array.fill[Byte](blockSize) {
@@ -44,7 +47,7 @@ class MetaFile(path: String) {
     }
     meta.reset()
     meta.get(bytes, 0, blockSize)
-    Block.apply(bytes)
+    MetaBlock.apply(bytes)
   }
 
   /**
@@ -52,31 +55,51 @@ class MetaFile(path: String) {
    * If it exists an [[IllegalArgumentException]] is thrown.
    *
    * This operation will add the specified block at the end of block list, updating the length
-   * counter by the value of [[Block.size]].
+   * counter by the value of [[MetaBlock.size]].
    *
    * @param block block to store
    * @throws IllegalArgumentException if the block already exists
    */
-  def append(block: Block) {
+  def append(block: MetaBlock) {
     findBlock(block.persistenceId) match {
-      case Some(_) => throw new IllegalArgumentException("This block already exists.")
+      case Some(_) => throw new IllegalArgumentException("This block already exists. Maybe try using update() instead?")
       case None =>
-        meta.position(LengthOffset)
-        val length = meta.getInt
+        val length = dataLength
         meta.position(DataOffset + length)
+        val storedPosition = meta.position()
         meta.put(block.bytes)
         meta.position(LengthOffset)
         meta.putInt(length + block.size)
-        blocks.append(block)
+        blocks.append(CachedBlock(storedPosition, block))
     }
+  }
+
+  /**
+   * Updates an existing block with the specified block. The update is first made to file and then to cache.
+   * If the specified block doesn't exist in cache, and [[IllegalStateException]] is thrown.
+   *
+   * @param block updated block
+   * @throws IllegalStateException if the specified block is not found in cache
+   */
+  def update(block: MetaBlock) {
+    findCachableBlock(block) match {
+      case None => throw new IllegalStateException(s"The specified block $block does not exist. Maybe try using append() instead?")
+      case Some(cachedBlock) =>
+        meta.position(cachedBlock.position)
+        meta.put(block.bytes)
+        blocks.update(blocks.indexOf(cachedBlock), cachedBlock.copy(block = block))
+    }
+  }
+
+  private def findCachableBlock(block: MetaBlock): Option[CachedBlock] = {
+    blocks.find(_.block.persistenceId == block.persistenceId)
   }
 
 }
 
-case class Block(size: Short, first: Long, last: Long, highestSequenceNr: Long, persistenceId: String) {
+case class MetaBlock(size: Short, first: Long, last: Long, highestSequenceNr: Long, persistenceId: String) {
   def bytes: Array[Byte] = {
-    val charset = Charset.forName("utf-8")
-    val pid = persistenceId.getBytes(charset)
+    val pid = persistenceId.getBytes(MetaBlock.CharactedSet)
     val buffer = ByteBuffer.allocate(size)
     buffer.putShort(size)
     buffer.putLong(first)
@@ -87,14 +110,16 @@ case class Block(size: Short, first: Long, last: Long, highestSequenceNr: Long, 
   }
 }
 
-object Block {
+object MetaBlock {
   private val PersistenceIdOffset = 26
+  private val CharactedSet = Charset.forName("utf-8")
 
-  def apply(first: Long, last: Long, highestSequenceNr: Long, persistenceId: String): Block =
-  // can such conversion to short crash the storage? Maybe expect that and write a test?
-    new Block((PersistenceIdOffset + persistenceId.length).toShort, first, last, highestSequenceNr, persistenceId)
+  def apply(first: Long, last: Long, highestSequenceNr: Long, persistenceId: String): MetaBlock = {
+    // can such conversion to short crash the storage? Maybe expect that and write a test?
+    new MetaBlock((PersistenceIdOffset + persistenceId.getBytes(CharactedSet).length).toShort, first, last, highestSequenceNr, persistenceId)
+  }
 
-  def apply(bytes: Array[Byte]): Block = {
+  def apply(bytes: Array[Byte]): MetaBlock = {
     val buffer = ByteBuffer.wrap(bytes)
     val blockSize = buffer.getShort
     val first = buffer.getLong
@@ -103,7 +128,7 @@ object Block {
     val persistenceIdLength = blockSize - PersistenceIdOffset
     val persistenceId = readString(buffer, persistenceIdLength)
 
-    Block(blockSize, first, last, highest, persistenceId)
+    MetaBlock(blockSize, first, last, highest, persistenceId)
   }
 
   private def readString(buffer: ByteBuffer, size: Int) = {
@@ -114,3 +139,5 @@ object Block {
     new String(stringArray)
   }
 }
+
+private case class CachedBlock(position: Int, block: MetaBlock)
