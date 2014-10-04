@@ -1,8 +1,6 @@
 package akka.persistence.file.storage
 
-import java.io.{File, RandomAccessFile}
-import java.nio.ByteBuffer
-import java.nio.charset.Charset
+import java.io.File
 
 import org.iq80.leveldb.util.FileUtils
 import org.scalatest.{BeforeAndAfter, FunSuite, Matchers}
@@ -56,33 +54,18 @@ class MetaFileSpec extends FunSuite with Matchers with BeforeAndAfter {
   }
 
   before {
-    MetaFileSpecUtils.writeSampleFile(path)
     meta = new MetaFile(path)
+    writeSampleFile(path)
   }
 
   after {
     FileUtils.deleteRecursively(new File(path))
   }
-}
 
-
-object MetaFileSpecUtils {
-  def writeSampleFile(path: String) {
-    val charset = Charset.forName("utf-8")
-
-    val bytes = Array(
-      MetaBlock(16, 0, 1, "P1").bytes,
-      MetaBlock(16, 0, 1, "P2").bytes
-    )
-
-
-    val header = ByteBuffer.allocate(8)
-    header.put("AKFM".getBytes(charset))
-    header.putInt(bytes.map(_.size).sum)
-
-    val stream = new RandomAccessFile(path, "rw")
-    stream.write(header.array())
-    stream.write(bytes.flatten)
+  private def writeSampleFile(path: String) {
+    Array(
+      MetaBlock(16, 0, 1, "P1"),
+      MetaBlock(16, 0, 1, "P2")
+    ).foreach(meta.append)
   }
-
 }

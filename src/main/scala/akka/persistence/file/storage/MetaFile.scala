@@ -1,6 +1,6 @@
 package akka.persistence.file.storage
 
-import java.io.RandomAccessFile
+import java.io.{File, FileOutputStream, RandomAccessFile}
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel.MapMode
 import java.nio.charset.Charset
@@ -10,9 +10,21 @@ import scala.collection.mutable.ListBuffer
 class MetaFile(path: String) {
   private val LengthOffset = 4
   private val DataOffset = 8
-  private val BufferSize = 0x01400000 //20 megabytes
+  //  private val BufferSize = 0x01400000 //20 megabytes
+  val backingFile = {
+    val file = new File(path)
+    if (!file.exists()) {
+      file.getParentFile.mkdirs()
+      val header = ByteBuffer.allocate(8)
+      header.put("AKFM".getBytes(MetaBlock.CharactedSet))
+      header.putInt(0)
+      new FileOutputStream(file).write(header.array())
+    }
+    new RandomAccessFile(file, "rw")
+  }
+  private var meta = initMeta()
 
-  private val meta = new RandomAccessFile(path, "rw").getChannel.map(MapMode.READ_WRITE, 0, BufferSize)
+  private def initMeta() = backingFile.getChannel.map(MapMode.READ_WRITE, 0, backingFile.length())
 
   private val blocks: ListBuffer[CachedBlock] = {
     val length = dataLength
@@ -65,12 +77,14 @@ class MetaFile(path: String) {
       case Some(_) => throw new IllegalArgumentException("This block already exists. Maybe try using update() instead?")
       case None =>
         val length = dataLength
+        val newLength = length + block.size
+        backingFile.setLength(DataOffset + newLength)
+        meta = initMeta()
         meta.position(DataOffset + length)
-        val storedPosition = meta.position()
         meta.put(block.bytes)
         meta.position(LengthOffset)
-        meta.putInt(length + block.size)
-        blocks.append(CachedBlock(storedPosition, block))
+        meta.putInt(newLength)
+        blocks.append(CachedBlock(DataOffset + length, block))
     }
   }
 
@@ -112,7 +126,7 @@ case class MetaBlock(size: Short, first: Long, last: Long, highestSequenceNr: Lo
 
 object MetaBlock {
   private val PersistenceIdOffset = 26
-  private val CharactedSet = Charset.forName("utf-8")
+  val CharactedSet = Charset.forName("utf-8")
 
   def apply(first: Long, last: Long, highestSequenceNr: Long, persistenceId: String): MetaBlock = {
     // can such conversion to short crash the storage? Maybe expect that and write a test?
