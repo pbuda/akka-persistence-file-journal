@@ -35,29 +35,19 @@ object FileUtils2 {
   def writeSampleFile(path: String) {
     val charset = Charset.forName("utf-8")
 
-    val buffers = Array(
-      generateBuffer("P1", charset),
-      generateBuffer("P2", charset)
+    val bytes = Array(
+      Block(16, -1, 1, "P1").bytes,
+      Block(16, -1, 1, "P2").bytes
     )
 
 
-    val header = ByteBuffer.allocate(12)
+    val header = ByteBuffer.allocate(8)
     header.put("AKFM".getBytes(charset))
-    header.putLong(buffers.map(_.capacity()).sum)
+    header.putInt(bytes.map(_.size).sum)
 
     val stream = new RandomAccessFile(path, "rw")
     stream.write(header.array())
-    buffers.foreach(buf => stream.write(buf.array()))
+    stream.write(bytes.flatten)
   }
 
-  private def generateBuffer(persistenceId: String, charset: Charset) = {
-    val pid = persistenceId.getBytes(charset)
-    val blockSize = (24 + pid.size).toShort
-    val buffer = ByteBuffer.allocate(blockSize + 2)
-    buffer.putShort(blockSize)
-    buffer.putLong(16)
-    buffer.putLong(-1)
-    buffer.putLong(1)
-    buffer.put(pid)
-  }
 }
