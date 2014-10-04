@@ -21,14 +21,14 @@ time consuming operation.
 
 | Offset | Field name | Data Type | Length      | Description                                                 |
 | -----: | ---------- | --------- | ----------- | ----------------------------------------------------------- |
-| 0      | Header     | String    | 8 bytes     | A string literal `APFM`                                     |
-| 8      | Meta size  | Long      | 8 bytes     | The total size of the `meta` blocks                         |
-| 16     | Metadata   | Blocks    | Unspecified | The blocks with information about messages from `data` file |
+| 0      | Header     | String    | 4 bytes     | UTF-8 encoded string literal `APFM`                         |
+| 4      | Meta size  | Int       | 4 bytes     | The total size of the `meta` blocks                         |
+| 8      | Metadata   | Blocks    | Unspecified | The blocks with information about messages from `data` file |
+
+#### Meta file's metadata block
 
 Metadata blocks are what is the most important part of the `meta` file. They contain information regarding messages
 for persistence ids. Each block represents metadata of a single persistence id.
-
-#### Meta file's metadata block
 
 The metadata blocks have the following structure:
 
@@ -38,6 +38,6 @@ The metadata blocks have the following structure:
 | Offset of the first message | 8 bytes  | Used to find the first message in the `data` file                  |
 | Offset of the last message  | 8 bytes  | Used to find the last message in the `data` file                   |
 | Highest sequence number     | 8 bytes  | The highest sequence number of the messages for the persistence id |
-| Persistence Id              | Variable | Persistence id of the actor                                        |
+| Persistence Id              | Variable | UTF-8 encoded persistence id of the actor                          |
 
 
