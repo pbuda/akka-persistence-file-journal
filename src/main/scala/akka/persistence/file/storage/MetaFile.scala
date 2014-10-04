@@ -3,49 +3,47 @@ package akka.persistence.file.storage
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel.MapMode
 
-class MetaFile(path: String) {
-  private val dataPositionOffset = 16
-  private val lengthOffset = 8
-  private val persistenceIdOffset = 24
-  private val meta = new RandomAccessFile(path, "rw").getChannel.map(MapMode.READ_WRITE, 0, 65535)
+import scala.collection.mutable.ListBuffer
 
-  def findBlock(persistenceId: String): Block = {
-    meta.rewind()
-    val markerArray = Array.fill[Byte](4) {
-      0
-    }
-    meta.get(markerArray, 0, 4)
-    val marker = new String(markerArray)
-    println(s"marker: $marker")
+class MetaFile(path: String) {
+  private val lengthOffset = 4
+  private val persistenceIdOffset = 24
+  private val meta = new RandomAccessFile(path, "rw").getChannel.map(MapMode.READ_WRITE, 0, 0x01400000)
+
+  private val blocks: ListBuffer[Block] = {
+    meta.position(lengthOffset)
     val length = meta.getLong
-    println(s"length: $length")
-    var pid = ""
-    var block:Block = null
-    while (meta.position() < length && pid != persistenceId) {
-      block = readCurrentBlock()
-      pid = block.persistenceId
+    val buffer = ListBuffer[Block]()
+    while (meta.position < length) {
+      buffer.append(readCurrentBlock())
     }
-    block
+    meta.rewind()
+    buffer
+  }
+
+  def findBlock(persistenceId: String): Option[Block] = {
+    blocks.find(_.persistenceId == persistenceId)
   }
 
   private def readCurrentBlock(): Block = {
+    val startPosition = meta.position()
     val blockSize = meta.getShort
-    println(s"blockSize: $blockSize")
     val first = meta.getLong
-    println(s"first: $first")
     val last = meta.getLong
-    println(s"last: $last")
     val highest = meta.getLong
-    println(s"highest: $highest")
     val persistenceIdLength = blockSize - persistenceIdOffset
-    val persistenceIdArray = Array.fill[Byte](persistenceIdLength) {
+    val persistenceId = readString(persistenceIdLength)
+
+    Block(startPosition, blockSize, first, last, highest, persistenceId)
+  }
+
+  private def readString(size: Int) = {
+    val stringArray = Array.fill[Byte](size) {
       0
     }
-    meta.get(persistenceIdArray, 0, persistenceIdLength)
-    val persistenceId = new String(persistenceIdArray)
-
-    Block(blockSize, first, last, highest, persistenceId)
+    meta.get(stringArray, 0, size)
+    new String(stringArray)
   }
 }
 
-case class Block(size: Short, first: Long, last: Long, highestSequenceNr: Long, persistenceId: String)
+case class Block(startPosition: Int, size: Short, first: Long, last: Long, highestSequenceNr: Long, persistenceId: String)
