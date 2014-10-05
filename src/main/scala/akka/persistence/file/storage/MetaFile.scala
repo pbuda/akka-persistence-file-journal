@@ -10,7 +10,6 @@ import scala.collection.mutable.ListBuffer
 class MetaFile(path: String) {
   private val LengthOffset = 4
   private val DataOffset = 8
-  //  private val BufferSize = 0x01400000 //20 megabytes
   val backingFile = {
     val file = new File(path)
     if (!file.exists()) {

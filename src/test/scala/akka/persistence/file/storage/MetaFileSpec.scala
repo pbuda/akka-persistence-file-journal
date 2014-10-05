@@ -6,7 +6,7 @@ import org.iq80.leveldb.util.FileUtils
 import org.scalatest.{BeforeAndAfter, FunSuite, Matchers}
 
 class MetaFileSpec extends FunSuite with Matchers with BeforeAndAfter {
-  val path = "target/tests.txt"
+  val path = "target/metafile.txt"
   var meta: MetaFile = _
 
   test("should find a block for persistenceId") {
