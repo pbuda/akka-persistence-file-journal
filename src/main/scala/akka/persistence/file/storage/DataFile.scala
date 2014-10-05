@@ -20,25 +20,53 @@ class DataFile(path: String) {
   }
   private var data = initData()
 
-  private def initData() = backingFile.getChannel.map(MapMode.READ_WRITE, 0, 65535)
+  private def initData() = backingFile.getChannel.map(MapMode.READ_WRITE, 0, backingFile.length())
 
   /**
    * Appends a new data block at the end of storage. After appending the new data block, the previous block
    * is updated with the new position of the next data block.
    *
    * @param block block to append.
+   * @return the same [[DataBlock]] but with updated [[DataBlock.position]] field with actual insert position
    */
-  def append(block: DataBlock) {
+  def append(block: DataBlock): DataBlock = {
+    if (block.position != -1) throw new IllegalArgumentException(s"The specified block $block already exists. Maybe try update() instead?")
+    val length = dataLength
+    val newLength = length + block.size
+    //grow file
+    backingFile.setLength(DataOffset + newLength)
+    data = initData()
+    //write block
+    val position: Int = DataOffset + length
+    data.position(position)
+    val updatedBlock = block.copy(position = position)
+    data.put(updatedBlock.bytes)
+    updateLength(newLength)
 
+    //update previous' block `next` position if this is not first block
+    if (!block.isFirst) {
+      data.position(block.previous)
+      val prevBlock = readBlock()
+      update(prevBlock.copy(next = position))
+    }
+
+    updatedBlock
   }
 
-  /**
-   * Updates (overwrites) the specified block with information contained in it.
-   *
-   * @param block block to update.
-   */
-  def update(block: DataBlock) {
+  private def dataLength = {
+    data.position(LengthOffset)
+    data.getInt
+  }
 
+  private def updateLength(newLength: Int) {
+    data.position(LengthOffset)
+    data.putInt(newLength)
+  }
+
+  private def update(block: DataBlock) {
+    if (block.position == -1) throw new IllegalStateException(s"The specified block $block doesn't exist. Maybe try append() instead?")
+    data.position(block.position)
+    data.put(block.bytes)
   }
 
   /**
@@ -50,7 +78,7 @@ class DataFile(path: String) {
   def collect(meta: MetaBlock): List[DataBlock] = {
     def readAll(acc: List[DataBlock]): List[DataBlock] = {
       val block = readBlock()
-      if (block.next > 0) {
+      if (!block.isLast) {
         data.position(block.next)
         readAll(acc :+ block)
       }
@@ -73,10 +101,15 @@ class DataFile(path: String) {
 
 }
 
-case class DataBlock(size: Int, previous: Int, next: Int, sequenceNr: Long, payload: Seq[Byte]) {
+case class DataBlock(size: Int, position: Int, previous: Int, next: Int, sequenceNr: Long, payload: Seq[Byte]) {
+  def isFirst = previous == 0
+
+  def isLast = next == 0
+
   def bytes = {
     val buffer = ByteBuffer.allocate(size)
     buffer.putInt(size)
+    buffer.putInt(position)
     buffer.putInt(previous)
     buffer.putInt(next)
     buffer.putLong(sequenceNr)
@@ -86,14 +119,15 @@ case class DataBlock(size: Int, previous: Int, next: Int, sequenceNr: Long, payl
 }
 
 object DataBlock {
-  private val DescriptorLength = 20
+  private val DescriptorLength = 24
 
   def apply(previous: Int, next: Int, sequenceNr: Long, payload: Seq[Byte]): DataBlock =
-    DataBlock(DescriptorLength + payload.size, previous, next, sequenceNr, payload)
+    DataBlock(DescriptorLength + payload.size, -1, previous, next, sequenceNr, payload)
 
   def apply(bytes: Array[Byte]): DataBlock = {
     val buffer = ByteBuffer.wrap(bytes)
     val size = buffer.getInt
+    val position = buffer.getInt
     val previous = buffer.getInt
     val next = buffer.getInt
     val sequenceNr = buffer.getLong
@@ -102,7 +136,7 @@ object DataBlock {
       0
     }
     buffer.get(payloadArray, 0, payloadSize)
-    DataBlock(size, previous, next, sequenceNr, payloadArray)
+    DataBlock(size, position, previous, next, sequenceNr, payloadArray)
   }
 
 }
